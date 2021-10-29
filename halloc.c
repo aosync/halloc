@@ -22,10 +22,12 @@ void *(*get_aligned_blocks)(uint64_t) = NULL;
 void (*unget_aligned_blocks)(void*,uint64_t) = NULL;
 
 static void *test_block(uint64_t count) {
+	// printf("allocating %llu\n", count);
 	return mmap(NULL, count * HALLOC_BLOCK, PROT_READ|PROT_WRITE, MAP_SHARED|MAP_ANON, -1, 0);
 }
 
 static void untest_block(void *ptr, uint64_t count) {
+	// printf("deallocating %llu\n", count);
 	munmap(ptr, count * HALLOC_BLOCK);
 }
 
@@ -100,13 +102,25 @@ static void freelist_insert(block_header_t *block, alloc_header_t *what, uint32_
 }
 
 static alloc_header_t *split(block_header_t *block, alloc_header_t *cur, size_t size) {
+		//printf("size is %u\n", cur->size);
 		if (cur->meta & 1 || cur->size < size)
 			return NULL;
 			// FREE AND GOOD SIZE
+
+		if (cur->bef == 0) {
+			block->freelist = cur->next;
+		}
+		else {
+			alloc_header_t *prev = ALLOC_OFF(block, cur->bef);
+			prev->next = cur->next;
+		}
+
 		if (cur->size - size <= sizeof(alloc_header_t)) {
+			//printf("cur size\n");
 			size = cur->size;
 		}
 		else {
+			//printf("current cur size %u and queried size is %u\n", cur->size, size);
 			alloc_header_t *remains = ALLOC_OFF(cur, size);
 			*remains = (alloc_header_t) {
 				.prev = size,
@@ -119,6 +133,7 @@ static alloc_header_t *split(block_header_t *block, alloc_header_t *cur, size_t 
 
 		cur->size = size;
 		cur->next = 0;
+		cur->bef = 0;
 		cur->meta |= 1;
 		block->rc++;
 		return cur;
@@ -127,20 +142,25 @@ static alloc_header_t *split(block_header_t *block, alloc_header_t *cur, size_t 
 alloc_header_t *march(block_header_t *block, size_t size) {
 	//printf("beginning march at block %p (last = %p) and seeking for %lu\n", block, last, size);
 	alloc_header_t *cur = ALLOC_OFF(block, block->freelist);
+	alloc_header_t *prev = NULL;
 	uint64_t curoff = block->freelist;
 	
 	while (cur) {
-		//printf("attempting to split cur (%p)\n", cur);
 		alloc_header_t *h = split(block, cur, size);
 		if (h) {
 			//printf("found suitable alloc (%p) of size (%u), returning\n", h, h->size);
 			return h;
 		}
 
-		if (cur->next == 0)
+		if (cur->next == 0){
+			//printf("because next is zero\n");
 			break;
+		}
+		prev = cur;
 		cur = ALLOC_OFF(block, cur->next);
 	}
+
+	//printf("unsuitable alloc\n");
 
 	if (block->next == NULL) {
 		block->next = create_block(size);
