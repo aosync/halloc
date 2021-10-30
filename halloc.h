@@ -2,6 +2,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#define HALLOC_POSIX_HOST
+
 #define HALLOC_BLOCK 4096
 
 struct alloc_header {
@@ -21,10 +23,17 @@ struct block_header {
 };
 typedef struct block_header block_header_t;
 
-extern block_header_t *last;
+extern block_header_t *halloc_last;
 
-extern void *(*get_aligned_blocks)(uint64_t);
+extern void *(*get_blocks)(uint64_t);
+extern void (*unget_blocks)(void*, uint64_t);
 
-void *halloc(size_t size);
+void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
 void free(void *ptr);
+
+#ifdef HALLOC_POSIX_HOST
+void dumpblocks();
+void *test_block(uint64_t count);
+void untest_block(void *ptr, uint64_t count);
+#endif
