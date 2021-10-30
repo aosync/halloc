@@ -186,6 +186,9 @@ void *malloc(size_t size) {
 }
 
 void free(void *ptr) {
+	if (ptr == NULL)
+		return;
+	
 	block_header_t *block = halloc_last;
 	block_header_t *pblock = NULL;
 	while (block) {
@@ -204,7 +207,7 @@ void free(void *ptr) {
 	if (block->freelist == 0) {
 		block->freelist = GETOFF(subject, block);
 		subject->meta = 0;
-		return;
+		goto end;
 	}
 
 	// NOTE: do NOT freelist_take the subject here. it obviously
@@ -240,6 +243,7 @@ void free(void *ptr) {
 
 	freelist_insert(block, subject, 0);
 
+end:
 	block->rc--;
 	if (block->rc == 0) {
 		if (pblock)
@@ -251,8 +255,12 @@ void free(void *ptr) {
 }
 
 void *realloc(void *ptr, size_t size) {
-	if (size == 0)
+	if (ptr == NULL && size == 0)
 		return NULL;
+	if (ptr != NULL && size == 0) {
+		free(ptr);
+		return NULL;
+	}
 	if (size > (uint32_t)-(sizeof(alloc_header_t) + sizeof(block_header_t)))
 		return NULL;
 
@@ -264,84 +272,74 @@ void *realloc(void *ptr, size_t size) {
 	alloc_header_t *header = NULL;
 	if (ptr == NULL) {
 		header = march(halloc_last, realsize);
-	}
-	else {
-		header = ALLOC_OFF_PREV(ptr, sizeof(alloc_header_t));
-		
-		block_header_t *block = halloc_last;
-		while (block) {
-			if ((size_t)block < (size_t)ptr && (size_t)ptr < (size_t)block + block->size * HALLOC_BLOCK) {
-				break;
-			}
-			block = block->next;
-		}		
-
-		if (block == NULL)
+		if (header == NULL)
 			return NULL;
 
-		if (header->size < realsize) {
-			if (WITHIN_BLOCK(header, block, sizeof(alloc_header_t))) {
-				alloc_header_t *next = ALLOC_OFF(header, header->size);
-				alloc_header_t *h = split(block, next, realsize - header->size);
-				if (h) {
-					header->size += h->size;
-				}
-				else {
-					h = malloc(size);
-					for (int i = 0; i < header->size - sizeof(alloc_header_t); i++)
-						((uint8_t*)h)[i] = ((uint8_t*)(header+1))[i];
-					free(header + 1);
-					header = ALLOC_OFF_PREV(h, sizeof(alloc_header_t));
-				}
-			}
-		}
-		else if (header->size > realsize) {
-			// shrink
-			if (WITHIN_BLOCK(header, block, sizeof(alloc_header_t))) {
-				// look for next to merge with
-				alloc_header_t *next = ALLOC_OFF(header, header->size);
-				if (!(next->meta & 1)) {
-					// OK, next free. good.
-					// now i need to make
-					alloc_header_t newnexttmp = *next;
-					alloc_header_t *newnext = ALLOC_OFF(header, realsize);
-					*newnext = newnexttmp;
-					newnext->size += header->size - realsize;
-					if (WITHIN_BLOCK(newnext, block, sizeof(alloc_header_t))) {
-						alloc_header_t *nextnext = ALLOC_OFF(newnext, newnext->size);
-						nextnext->prev = newnext->size;
-					}
-
-					// set the new size
-					header->size = realsize;
-					goto success;
-				}
-
-			}
-			// 2 cases remaining:
-			// - when the new space created is too small for a header and no free space after: do nothing [OK]
-			// - when the space creates enough space for a header create an alloc
-
-			if (header->size - realsize > sizeof(alloc_header_t)) {
-				alloc_header_t *new = ALLOC_OFF(header, realsize);
-				*new = (alloc_header_t) {
-					.size = header->size - realsize,
-					.prev = realsize,
-					.meta = 0,
-				};
-
-				freelist_insert(block, new, 0);
-				header->size = realsize;
-			}
-		}
+		return header + 1;
 	}
-	
 
-success:
-	if (header == NULL)
+	/* UNIMPLEMENTED */
+
+	// Get header
+	header = ALLOC_OFF_PREV(ptr, sizeof(alloc_header_t));
+
+	// if no change in size, return as is
+	if (header->size == realsize)
+		return ptr;
+
+	goto copy;
+
+	// Find block corresponding to ptr
+	block_header_t *block = halloc_last;
+	while (block) {
+		if ((size_t)block < (size_t)ptr && (size_t)ptr < (size_t)block + block->size * HALLOC_BLOCK) {
+			break;
+		}
+		block = block->next;
+	}
+
+	if (block == NULL)
 		return NULL;
 
-	return header + 1;
+	// printf("%d and %d\n", realsize, header->size);
+	if (realsize < header->size) {
+		// printf("test\n");
+		// if room for new header region, add it :)
+		if (header->size - realsize > sizeof(alloc_header_t)) {
+			alloc_header_t *remains = ALLOC_OFF(header, realsize);
+			*remains = (alloc_header_t) {
+				.next = 0,
+				.bef = 0,
+				.meta = 1,
+				.prev = realsize,
+				.size = header->size - realsize,
+			};
+			
+			// free() to benefit from the collate
+			block->rc++;
+			free(remains+1);
+
+			header->size = realsize;
+		}
+		
+		// else, we don't want to change anything.
+		return header + 1;
+	}
+
+	// header->size < realsize
+	// FALLTHROUGH
+	
+copy:;
+	uint8_t *new = malloc(size);
+	if (new == NULL)
+		return NULL;
+
+	for (int i = 0; i < size; i++) {
+		new[i] = ((uint8_t*)ptr)[i];
+	}
+	free(ptr);
+
+	return new;
 }
 
 #ifdef HALLOC_POSIX_HOST

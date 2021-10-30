@@ -1,5 +1,6 @@
 #include "halloc.h"
 
+#include "stack.h"
 #include <stdio.h>
 // #include <stdlib.h>
 
@@ -35,10 +36,22 @@
 	halloc(sizeof(int));
 }*/
 
+typedef def_stack(int) intstack;
+
 int main() {
 	get_blocks = test_block;
 	unget_blocks = untest_block;
-	for (int i = 0; i < 1000000; i++) {
-		malloc(10);
+	intstack a;
+	stinit(a);
+	
+	for (int i = 0; i < 10000; i++) {
+		stpush(a, i*2);
 	}
+
+	while (a.len > 0) {
+		printf("%d\n", stpop(a));
+	}
+	
+	stfree(a);
+	printf("%p\n", halloc_last);
 }
