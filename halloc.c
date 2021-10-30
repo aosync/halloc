@@ -167,16 +167,17 @@ alloc_header_t *march(block_header_t *block, size_t size) {
 	}
 
 full:
-	if (block->next == NULL) {
-		block_header_t *tmp = create_block(size);
-		if (tmp != NULL) {
-			tmp->next = halloc_last;
-			halloc_last = tmp;
-			return march(tmp, size);
-		}
-	}
 	if (block->next) {
 		return march(block->next, size);
+	}
+	else {
+		block_header_t *tmp = create_block(size);
+		if (tmp != NULL) {
+			alloc_header_t *m = march(tmp, size);
+			tmp->next = halloc_last;
+			halloc_last = tmp;
+			return m;
+		}
 	}
 	return NULL;
 }
