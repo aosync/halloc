@@ -267,6 +267,8 @@ void *realloc(void *ptr, size_t size) {
 	size_t realsize = size + sizeof(alloc_header_t);
 	if (halloc_last == NULL)
 		halloc_last = create_block(realsize);
+	if (halloc_last == NULL)
+		return NULL;
 
 
 	alloc_header_t *header = NULL;
